@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: ecofusa-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ecofusa_gis
+      POSTGRES_USER: ecofusa_admin
+      POSTGRES_PASSWORD: EcoFusa_TRL5_Secure2026!
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+      - ./database/init_postgis_ecofusa.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecofusa_admin -d ecofusa_gis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  geoserver:
+    image: docker.osgeo.org/geoserver:2.25.2
+    container_name: ecofusa-geoserver
+    restart: unless-stopped
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      GEOSERVER_ADMIN_USER: admin
+      GEOSERVER_ADMIN_PASSWORD: geoserver
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: "*"
+    ports:
+      - "8080:8080"
+    volumes:
+      - geoserver_data:/opt/geoserver_data
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ecofusa-pgadmin
+    restart: unless-stopped
+    depends_on:
+      - postgis
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@ecofusa.gov.co
+      PGADMIN_DEFAULT_PASSWORD: EcoFusa_Admin2026!
+    ports:
+      - "5050:80"
+
+volumes:
+  postgis_data:
+  geoserver_data:

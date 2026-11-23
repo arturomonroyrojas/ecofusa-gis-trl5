@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EcoFusa GIS TRL5 | Plataforma Ambiental Georreferenciada – Fusagasugá</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    #map { height: 500px; border-radius: 0.75rem; z-index: 1; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+  <header class="bg-emerald-900 text-white shadow-md">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h1 class="text-xl font-bold tracking-tight">EcoFusa GIS <span class="text-emerald-300 text-sm font-normal">| Prototipo Funcional TRL5</span></h1>
+        <p class="text-xs text-emerald-100">ArcGIS Pro + Python/GeoPandas + PostGIS (EPSG:9377 CTM12) + GeoServer OGC (WMS/WFS)</p>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <span class="bg-emerald-700 px-3 py-1 rounded-full font-semibold">EcoPuntos: <span id="ecopuntos">145</span> pts</span>
+        <select id="rolSelect" class="bg-emerald-800 border border-emerald-600 rounded-lg px-2 py-1 text-white">
+          <option value="ADMIN">Rol: Funcionario Alcaldía</option>
+          <option value="CIUDADANO">Rol: Ciudadano</option>
+        </select>
+        <button onclick="exportarCSV()" class="bg-white text-emerald-900 font-semibold px-3 py-1 rounded-lg hover:bg-emerald-100">Exportar CSV</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <!-- Tarjetas KPI -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <p class="text-xs text-slate-500 uppercase font-semibold">Reportes Registrados</p>
+        <p id="kpiTotal" class="text-2xl font-bold text-slate-900 mt-1">0</p>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <p class="text-xs text-slate-500 uppercase font-semibold">Críticos en Ronda Hídrica</p>
+        <p id="kpiRonda" class="text-2xl font-bold text-red-600 mt-1">0</p>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <p class="text-xs text-slate-500 uppercase font-semibold">Tasa de Resolución</p>
+        <p id="kpiResolucion" class="text-2xl font-bold text-emerald-700 mt-1">0%</p>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <p class="text-xs text-slate-500 uppercase font-semibold">Tiempo Promedio SLA</p>
+        <p class="text-2xl font-bold text-sky-700 mt-1">3.8 d</p>
+      </div>
+    </section>
+
+    <!-- Geovisor SIG + Formulario GPS -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h2 class="font-bold text-slate-800">Geovisor SIG Fusagasugá (Leaflet + GeoServer WMS/WFS)</h2>
+          <label class="text-xs flex items-center gap-1.5 text-slate-600">
+            <input type="checkbox" id="toggleGeoServer" onchange="toggleWMS()" />
+            Activar capa WMS local (<code>localhost:8080/geoserver/ecofusa</code>)
+          </label>
+        </div>
+        <div id="map"></div>
+        <p class="text-xs text-slate-500 mt-2">Haz clic en cualquier punto del mapa para capturar coordenadas GPS (WGS84) y validar intersección con Rondas Hídricas.</p>
+      </div>
+
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+        <h2 class="font-bold text-slate-800 mb-3">Nuevo Reporte Ambiental Georreferenciado</h2>
+        <form id="formReporte" class="space-y-3 text-sm">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600">Categoría Ambiental</label>
+            <select id="categoria" class="w-full mt-1 border rounded-lg px-3 py-2">
+              <option>Contaminación Hídrica (Ronda)</option>
+              <option>Residuos Sólidos en Espacio Público</option>
+              <option>Quema / Humo No Autorizado</option>
+              <option>Escombros en Corredor Vial</option>
+              <option>Deterioro de Zonas Verdes</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600">Barrio / Vereda</label>
+            <input id="barrio" required placeholder="Ej. Vereda Pekín / Balmoral / Río Cuja" class="w-full mt-1 border rounded-lg px-3 py-2" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-semibold text-slate-600">Latitud (WGS84)</label>
+              <input id="lat" type="number" step="0.000001" value="4.336500" required class="w-full mt-1 border rounded-lg px-2 py-1.5 bg-slate-50" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600">Longitud (WGS84)</label>
+              <input id="lon" type="number" step="0.000001" value="-74.363800" required class="w-full mt-1 border rounded-lg px-2 py-1.5 bg-slate-50" />
+            </div>
+          </div>
+          <button type="button" onclick="capturarGPS()" class="w-full bg-sky-50 text-sky-800 border border-sky-200 font-semibold py-1.5 rounded-lg hover:bg-sky-100 text-xs">
+            Usar mi ubicación GPS actual
+          </button>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600">Descripción Técnica</label>
+            <textarea id="desc" rows="3" required placeholder="Describa el evento ambiental observado..." class="w-full mt-1 border rounded-lg px-3 py-2"></textarea>
+          </div>
+          <button type="submit" class="w-full bg-emerald-700 text-white font-bold py-2.5 rounded-lg hover:bg-emerald-800">
+            Radicar Reporte (+10 EcoPuntos)
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Tabla de Trazabilidad Institucional -->
+    <section class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+      <h2 class="font-bold text-slate-800 mb-3">Panel de Seguimiento y Trazabilidad Auditable (Alcaldía Municipal)</h2>
+      <table class="w-full text-left text-xs border-collapse">
+        <thead>
+          <tr class="border-b-2 border-slate-200 text-slate-600">
+            <th class="py-2 px-2">Radicado</th>
+            <th class="py-2 px-2">Categoría</th>
+            <th class="py-2 px-2">Sector</th>
+            <th class="py-2 px-2">Cruce Ronda</th>
+            <th class="py-2 px-2">Estado</th>
+            <th class="py-2 px-2">Acción (RBAC)</th>
+          </tr>
+        </thead>
+        <tbody id="tablaBody" class="divide-y divide-slate-100"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const map = L.map('map').setView([4.3365, -74.3638], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap | EcoFusa GIS TRL5'
+    }).addTo(map);
+
+    const rondas = [
+      { nombre: "Ronda Qda. La Parroquia (Pekín)", lat: 4.3485, lon: -74.3510, radio: 320 },
+      { nombre: "Ronda Río Cuja Sector Sur", lat: 4.3248, lon: -74.3692, radio: 380 },
+      { nombre: "Ronda Quebrajacho Norte", lat: 4.3470, lon: -74.3665, radio: 300 }
+    ];
+    rondas.forEach(r => {
+      L.circle([r.lat, r.lon], { radius: r.radio, color: '#0284c7', fillColor: '#38bdf8', fillOpacity: 0.22 })
+        .bindPopup(`<b>${r.nombre}</b><br>Suelo Rural – Protección Hídrica (POT)`).addTo(map);
+    });
+
+    const wmsRondas = L.tileLayer.wms("http://localhost:8080/geoserver/ecofusa/wms", {
+      layers: 'ecofusa:rondas_hidricas', format: 'image/png', transparent: true, version: '1.1.1'
+    });
+    function toggleWMS() {
+      if (document.getElementById('toggleGeoServer').checked) wmsRondas.addTo(map);
+      else map.removeLayer(wmsRondas);
+    }
+
+    let ecopuntos = 145;
+    let reportes = [
+      { id: "ECO-2026-0001", cat: "Contaminación Hídrica (Ronda)", barrio: "Vereda Pekín", lat: 4.3490, lon: -74.3505, ronda: true, estado: "SOLUCIONADO", desc: "Limpieza preventiva de margen Qda. La Parroquia." },
+      { id: "ECO-2026-0002", cat: "Residuos Sólidos en Espacio Público", barrio: "Centro / Plaza Mayor", lat: 4.3368, lon: -74.3640, ronda: false, estado: "EN_PROCESO", desc: "Punto crítico de residuos comerciales." },
+      { id: "ECO-2026-0003", cat: "Escombros en Corredor Vial", barrio: "Vía Tramo 1 - Sur", lat: 4.2913, lon: -74.3886, ronda: false, estado: "PENDIENTE", desc: "Disposición irregular de RCD en berma." },
+      { id: "ECO-2026-0004", cat: "Contaminación Hídrica (Ronda)", barrio: "Ronda Río Cuja", lat: 4.3250, lon: -74.3690, ronda: true, estado: "EN_PROCESO", desc: "Obstrucción parcial de cauce por material vegetal y plásticos." }
+    ];
+
+    const markersLayer = L.layerGroup().addTo(map);
+
+    function estaEnRonda(lat, lon) {
+      return rondas.some(r => map.distance([lat, lon], [r.lat, r.lon]) <= r.radio);
+    }
+
+    function render() {
+      markersLayer.clearLayers();
+      const tbody = document.getElementById('tablaBody');
+      tbody.innerHTML = '';
+      const esAdmin = document.getElementById('rolSelect').value === 'ADMIN';
+
+      reportes.forEach((rep, i) => {
+        const color = rep.estado === 'SOLUCIONADO' ? '#059669' : (rep.estado === 'EN_PROCESO' ? '#d97706' : '#dc2626');
+        L.circleMarker([rep.lat, rep.lon], { radius: 8, fillColor: color, color: '#fff', weight: 2, fillOpacity: 0.92 })
+          .bindPopup(`<b>${rep.id}</b> (${rep.estado})<br>${rep.cat}<br><i>${rep.barrio}</i><br>${rep.desc}`).addTo(markersLayer);
+
+        tbody.innerHTML += `
+          <tr class="hover:bg-slate-50">
+            <td class="py-2 px-2 font-mono font-bold">${rep.id}</td>
+            <td class="py-2 px-2">${rep.cat}</td>
+            <td class="py-2 px-2">${rep.barrio}</td>
+            <td class="py-2 px-2">${rep.ronda ? '<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded font-semibold">CRÍTICA (RONDA)</span>' : '<span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded">ESTÁNDAR</span>'}</td>
+            <td class="py-2 px-2 font-semibold" style="color:${color}">${rep.estado}</td>
+            <td class="py-2 px-2">
+              ${esAdmin && rep.estado !== 'SOLUCIONADO'
+                ? `<button onclick="avanzarEstado(${i})" class="bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700">Avanzar Estado</button>`
+                : '<span class="text-slate-400">—</span>'}
+            </td>
+          </tr>`;
+      });
+
+      document.getElementById('kpiTotal').innerText = reportes.length;
+      document.getElementById('kpiRonda').innerText = reportes.filter(r => r.ronda).length;
+      const sol = reportes.filter(r => r.estado === 'SOLUCIONADO').length;
+      document.getElementById('kpiResolucion').innerText = Math.round((sol / reportes.length) * 100) + '%';
+      document.getElementById('ecopuntos').innerText = ecopuntos;
+    }
+
+    function avanzarEstado(idx) {
+      if (reportes[idx].estado === 'PENDIENTE') reportes[idx].estado = 'EN_PROCESO';
+      else if (reportes[idx].estado === 'EN_PROCESO') { reportes[idx].estado = 'SOLUCIONADO'; ecopuntos += 25; }
+      render();
+    }
+
+    map.on('click', e => {
+      document.getElementById('lat').value = e.latlng.lat.toFixed(6);
+      document.getElementById('lon').value = e.latlng.lng.toFixed(6);
+    });
+
+    function capturarGPS() {
+      if (!navigator.geolocation) return alert("Navegador sin soporte GPS.");
+      navigator.geolocation.getCurrentPosition(pos => {
+        document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
+        document.getElementById('lon').value = pos.coords.longitude.toFixed(6);
+        map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+      });
+    }
+
+    document.getElementById('formReporte').addEventListener('submit', e => {
+      e.preventDefault();
+      const lat = parseFloat(document.getElementById('lat').value);
+      const lon = parseFloat(document.getElementById('lon').value);
+      const nuevo = {
+        id: `ECO-2026-${String(reportes.length + 1).padStart(4, '0')}`,
+        cat: document.getElementById('categoria').value,
+        barrio: document.getElementById('barrio').value,
+        lat, lon,
+        ronda: estaEnRonda(lat, lon),
+        estado: "PENDIENTE",
+        desc: document.getElementById('desc').value
+      };
+      reportes.unshift(nuevo);
+      ecopuntos += 10;
+      e.target.reset();
+      document.getElementById('lat').value = lat.toFixed(6);
+      document.getElementById('lon').value = lon.toFixed(6);
+      render();
+    });
+
+    document.getElementById('rolSelect').addEventListener('change', render);
+
+    function exportarCSV() {
+      const headers = ["Radicado,Categoria,Barrio,Latitud,Longitud,EnRondaHidrica,Estado"];
+      const rows = reportes.map(r => `${r.id},"${r.cat}","${r.barrio}",${r.lat},${r.lon},${r.ronda},${r.estado}`);
+      const blob = new Blob([headers.concat(rows).join("\n")], { type: "text/csv;charset=utf-8;" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "ecofusa_reportes_trl5.csv";
+      a.click();
+    }
+
+    render();
+  </script>
+</body>
+</html>
